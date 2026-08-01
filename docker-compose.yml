@@ -1,0 +1,24 @@
+# Local SQL Server 2022 — same engine as Azure SQL so dev and prod share one Prisma
+# provider, one schema, and one migration history. (PLAN.md §12.2)
+#
+#   npm run db:up      start
+#   npm run db:wait    block until it accepts connections
+#   npm run db:down    stop
+#
+# Needs ~2 GB RAM available to the container runtime.
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: examsim-mssql
+    environment:
+      ACCEPT_EULA: 'Y'
+      MSSQL_SA_PASSWORD: 'Local_Dev_Pw1'
+      MSSQL_PID: 'Developer'
+    ports:
+      - '1433:1433'
+    volumes:
+      - mssql-data:/var/opt/mssql
+    restart: unless-stopped
+
+volumes:
+  mssql-data:

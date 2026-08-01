@@ -1,0 +1,118 @@
+name: Build and deploy to Azure App Service
+
+# PLAN.md §12.4. Builds a prebuilt standalone artifact — Oryx (App Service's built-in
+# builder) handles Next.js poorly, so SCM_DO_BUILD_DURING_DEPLOYMENT must be false.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '22.x'
+  AZURE_WEBAPP_NAME: claude-exam-simulator
+
+permissions:
+  contents: read
+  id-token: write # OIDC federated credentials — no publish-profile secrets
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # The build FAILS if the question banks don't parse. A silently dropped
+      # question would corrupt every blueprint allocation downstream.
+      - name: Ingest and validate question banks
+        run: |
+          npm run ingest
+          npm run validate
+
+      - run: npx prisma generate
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npm test
+
+      - run: npm run build
+        env:
+          # Not used at build time, but Prisma requires the variable to be present.
+          DATABASE_URL: ${{ secrets.BUILD_DATABASE_URL || 'sqlserver://placeholder:1433;database=none;user=none;password=none;encrypt=true;trustServerCertificate=true' }}
+
+      # Assemble the standalone bundle. Standalone output does NOT include the Prisma
+      # CLI, so it is added explicitly for the startup-time `migrate deploy`.
+      - name: Assemble deployment artifact
+        run: |
+          mkdir -p deploy
+          cp -r .next/standalone/. deploy/
+          mkdir -p deploy/.next
+          cp -r .next/static deploy/.next/static
+          [ -d public ] && cp -r public deploy/public || true
+          cp -r prisma deploy/prisma
+          cp -r generated deploy/generated
+          cp startup.sh deploy/startup.sh
+          chmod +x deploy/startup.sh
+          # Prisma CLI + engines + tsx, needed by startup.sh
+          mkdir -p deploy/node_modules/.bin
+          cp -r node_modules/prisma deploy/node_modules/prisma
+          cp -r node_modules/@prisma deploy/node_modules/@prisma
+          cp -r node_modules/tsx deploy/node_modules/tsx
+          cp -r node_modules/esbuild deploy/node_modules/esbuild
+          cp -rP node_modules/.bin/prisma deploy/node_modules/.bin/prisma
+          cp -rP node_modules/.bin/tsx deploy/node_modules/.bin/tsx
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: deploy
+          include-hidden-files: true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app
+          path: deploy
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: deploy
+          startup-command: 'bash /home/site/wwwroot/startup.sh'
+
+      # The database may be auto-paused; the first request wakes it, so allow time.
+      - name: Smoke-test the health endpoint
+        run: |
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health" || true)
+            echo "attempt ${attempt}: HTTP ${code}"
+            if [ "$code" = "200" ]; then
+              echo "Health check passed."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Health check never returned 200." >&2
+          exit 1

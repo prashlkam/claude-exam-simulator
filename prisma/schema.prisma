@@ -1,0 +1,150 @@
+// Claude Exam Simulator — data model (PLAN.md §6)
+//
+// SQL Server conventions applied uniformly (PLAN.md §6.1):
+//   1. Every String used as a PK, FK, or unique key carries an explicit @db.NVarChar(n).
+//      Prisma defaults String to nvarchar(1000) = 2000 bytes, over SQL Server's 900-byte
+//      index key limit, which fails at migrate time on every PK.
+//   2. Enums are String + const-object unions in lib/enums.ts + CHECK constraints.
+//      SQL Server has no native enum type.
+//   3. Json is String @db.NVarChar(Max) + lib/json.ts helpers. Prisma's Json scalar is
+//      unsupported on the sqlserver provider.
+//   4. Every relation sets onUpdate: NoAction. Exam -> Domain -> Question and
+//      Exam -> Question are two update-cascade paths to one table, which SQL Server
+//      rejects with "may cause cycles or multiple cascade paths". IDs are immutable
+//      cuids, so update-cascade has no value anyway.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid()) @db.NVarChar(30)
+  email         String    @unique @db.NVarChar(255)
+  name          String?   @db.NVarChar(120)
+  passwordHash  String    @db.NVarChar(255)
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+
+  sessions ExamSession[]
+}
+
+model Exam {
+  id                 String @id @default(cuid()) @db.NVarChar(30)
+  code               String @unique @db.NVarChar(16) // CCAO-F | CCDV-F | CCAR-F
+  title              String @db.NVarChar(200)
+  realItemCount      Int
+  durationMinutes    Int
+  passingScaledScore Int    @default(720)
+  bankSize           Int    @default(0)
+
+  domains   Domain[]
+  questions Question[]
+  sessions  ExamSession[]
+}
+
+model Domain {
+  id     String @id @default(cuid()) @db.NVarChar(30)
+  examId String @db.NVarChar(30)
+  index  Int
+  name   String @db.NVarChar(200)
+  weight Float
+
+  exam      Exam       @relation(fields: [examId], references: [id], onUpdate: NoAction)
+  questions Question[]
+
+  @@unique([examId, index])
+}
+
+model Question {
+  id          String  @id @default(cuid()) @db.NVarChar(30)
+  externalId  String  @unique @db.NVarChar(64) // "CCAO-F-Q1"
+  examId      String  @db.NVarChar(30)
+  domainId    String  @db.NVarChar(30)
+  number      Int
+  subTopic    String? @db.NVarChar(300)
+  type        String  @db.NVarChar(10) // QuestionType: SINGLE | MULTI
+  stem        String  @db.NVarChar(Max)
+  explanation String  @db.NVarChar(Max)
+  contentHash String  @db.NVarChar(80)
+  revision    Int     @default(1)
+
+  options      Option[]
+  sessionItems SessionItem[]
+  exam         Exam          @relation(fields: [examId], references: [id], onUpdate: NoAction)
+  domain       Domain        @relation(fields: [domainId], references: [id], onUpdate: NoAction)
+
+  @@index([examId, domainId])
+}
+
+model Option {
+  id         String  @id @default(cuid()) @db.NVarChar(30)
+  questionId String  @db.NVarChar(30)
+  letter     String  @db.NVarChar(1) // original A-D
+  text       String  @db.NVarChar(Max)
+  isCorrect  Boolean
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([questionId, letter])
+}
+
+model ExamSession {
+  id     String @id @default(cuid()) @db.NVarChar(30)
+  userId String @db.NVarChar(30)
+  examId String @db.NVarChar(30)
+
+  mode   String @db.NVarChar(10) // ExamMode:      MOCK | REAL
+  timing String @db.NVarChar(10) // TimingMode:    TIMED | UNTIMED
+  status String @default("IN_PROGRESS") @db.NVarChar(16)
+  // SessionStatus: IN_PROGRESS | SUBMITTED | EXPIRED | ABANDONED
+
+  itemCount       Int
+  durationMinutes Int? // null when UNTIMED
+  seed            String @db.NVarChar(64) // reproducible shuffle
+
+  startedAt   DateTime  @default(now())
+  endsAt      DateTime? // null when UNTIMED — server authority
+  submittedAt DateTime?
+  lastSeenAt  DateTime  @default(now())
+
+  rawScore    Int?
+  rawTotal    Int?
+  scaledScore Int?
+  passed      Boolean?
+
+  items SessionItem[]
+  user  User          @relation(fields: [userId], references: [id], onUpdate: NoAction)
+  exam  Exam          @relation(fields: [examId], references: [id], onUpdate: NoAction)
+
+  @@index([userId, examId, submittedAt])
+  @@index([userId, status])
+}
+
+model SessionItem {
+  id         String @id @default(cuid()) @db.NVarChar(30)
+  sessionId  String @db.NVarChar(30)
+  questionId String @db.NVarChar(30)
+
+  position        Int     // shuffled question order, 0-based
+  optionOrder     String  @db.NVarChar(16) // e.g. "C,A,D,B" — slot 1 shows original C
+  selectedLetters String? @db.NVarChar(16) // e.g. "B" or "A,C" (original letters)
+  flagged         Boolean @default(false)
+
+  isCorrect  Boolean?
+  answeredAt DateTime?
+
+  // Snapshot so historical results survive question-bank edits (PLAN.md §5.4)
+  stemSnapshot    String @db.NVarChar(Max)
+  optionsSnapshot String @db.NVarChar(Max) // JSON string — see lib/json.ts
+
+  session  ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  question Question    @relation(fields: [questionId], references: [id], onUpdate: NoAction)
+
+  @@unique([sessionId, questionId])
+  @@index([sessionId, position])
+}

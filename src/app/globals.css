@@ -1,0 +1,123 @@
+@import 'tailwindcss';
+
+/* Class-based dark mode so the toggle can override the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: 30 20% 99%;
+  --foreground: 224 30% 12%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 224 30% 12%;
+
+  --muted: 30 12% 95%;
+  --muted-foreground: 220 9% 42%;
+
+  --border: 24 10% 89%;
+  --input: 24 10% 89%;
+
+  --primary: 14 58% 55%;
+  --primary-foreground: 0 0% 100%;
+
+  --accent: 30 14% 94%;
+  --accent-foreground: 224 30% 12%;
+
+  --success: 152 50% 36%;
+  --success-muted: 152 45% 94%;
+  --warning: 35 88% 45%;
+  --warning-muted: 40 90% 94%;
+  --danger: 0 66% 49%;
+  --danger-muted: 0 75% 96%;
+
+  --ring: 14 58% 55%;
+  --radius: 0.6rem;
+}
+
+.dark {
+  --background: 224 24% 8%;
+  --foreground: 30 15% 92%;
+
+  --card: 224 22% 11%;
+  --card-foreground: 30 15% 92%;
+
+  --muted: 223 18% 16%;
+  --muted-foreground: 220 10% 62%;
+
+  --border: 223 15% 21%;
+  --input: 223 15% 21%;
+
+  --primary: 14 62% 60%;
+  --primary-foreground: 224 30% 10%;
+
+  --accent: 223 18% 17%;
+  --accent-foreground: 30 15% 92%;
+
+  --success: 152 45% 48%;
+  --success-muted: 152 35% 16%;
+  --warning: 38 80% 58%;
+  --warning-muted: 38 45% 16%;
+  --danger: 0 66% 62%;
+  --danger-muted: 0 40% 18%;
+
+  --ring: 14 62% 60%;
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-muted: hsl(var(--success-muted));
+  --color-warning: hsl(var(--warning));
+  --color-warning-muted: hsl(var(--warning-muted));
+  --color-danger: hsl(var(--danger));
+  --color-danger-muted: hsl(var(--danger-muted));
+  --color-ring: hsl(var(--ring));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* Numeric UI (timers, scores, question counters) must not jitter as digits change. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+}
